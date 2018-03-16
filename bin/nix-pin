@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+
+import os
+import errno
+import sys
+import argparse
+import json
+import logging
+import subprocess
+
+ARCHIVE_EXT = '.tgz'
+JSON_EXT = '.json'
+
+def nix_of_string(s):
+	#TODO: escaping
+	return '"' + s + '"'
+
+class LocalRepo(object):
+	is_local = True
+	def __init__(self, root):
+		self.root = root
+
+	def export(self, dest, revision, *, paths):
+		subprocess.check_call(
+			['git', 'archive', '--format=tgz', '--prefix=git-export/', '--output', dest, revision],
+			cwd = self.repo_path(paths=paths))
+
+	def repo_path(self, *, paths):
+		return self.root.replace('~/', paths.home + '/')
+
+	def description(self, *, paths):
+		return self.repo_path(paths=paths)
+
+	def update_revision(self, spec, *, paths):
+		def to_sha(bytes):
+			return bytes.decode('ascii').strip()
+
+		if spec is None:
+			git_env = os.environ.copy()
+			git_env.update({
+				"GIT_AUTHOR_NAME": "nobody",
+				"GIT_AUTHOR_EMAIL": "nobody@example.org",
+				"GIT_AUTHOR_DATE": '1970-01-01T00:00:00Z',
+				"GIT_COMMITTER_NAME": "nobody",
+				"GIT_COMMITTER_EMAIL": "nobody@example.org",
+				"GIT_COMMITTER_DATE": '1970-01-01T00:00:00Z',
+			})
+			root = self.repo_path(paths=paths)
+			stash_rev = to_sha(subprocess.check_output(
+				['git', 'stash', 'create'],
+				cwd = root, env = git_env))
+			if stash_rev:
+				return stash_rev
+			else:
+				spec = 'HEAD'
+
+		# spec must be set at this point
+		return to_sha(subprocess.check_output(['git','rev-parse', spec], cwd=root))
+
+class RemoteRepo(object):
+	is_local = False
+	def __init__(self, repo, ref):
+		self.repo = repo
+		self.ref = ref
+
+class Repo(object):
+	@staticmethod
+	def from_attrs(attrs):
+		root = attrs.get('root', None)
+		if root is not None:
+			return LocalRepo(root)
+		else:
+			return RemoteRepo(attrs['url'], attrs.get('branch', None))
+
+class Pin(object):
+	def __init__(self, name, attrs):
+		self.name = name
+		self.attrs = attrs
+		self.repo = Repo.from_attrs(attrs)
+
+	@classmethod
+	def from_json(cls, name, json):
+		return cls(name, json)
+
+	def to_json(self):
+		return self.attrs
+
+	def setattr(self, key, value):
+		self.attrs[key] = value
+
+	def attr(self, key):
+		return self.attrs[key]
+
+	def attr_or(self, key, dfl):
+		return self.attrs.get(key, dfl)
+
+	@staticmethod
+	def json_path_for(name, paths):
+		return os.path.join(paths.pins, name + JSON_EXT)
+
+	def json_path(self, paths):
+		return type(self).json_path_for(self.name, paths)
+
+	@property
+	def revision(self):
+		return self.attr('revision')
+
+	@property
+	def archive_filename(self):
+		return self.name + '-' + self.revision + ARCHIVE_EXT
+
+	@property
+	def aliases(self):
+		self.attr_or('aliases', [])
+
+	def archive_path(self, *, paths, temp=False):
+		filename = self.archive_filename
+		if temp:
+			filename = filename + '.tmp'
+		return os.path.join(paths.cache, filename)
+
+	def to_nix(self, *, paths):
+		return '''
+			rec {{
+				src = {src};
+				spec = lib.importJSON {jsonPath};
+				attrs = spec.attrs or {{}};
+				drv = importFromArchive src {drvPath};
+			}}
+		'''.format(
+			src = self.archive_path(paths=paths),
+			jsonPath = self.json_path(paths=paths),
+			drvPath = nix_of_string(self.attr_or('path', 'default.nix'))
+		)
+
+	def populate_archive(self, *, paths, force=False):
+		archive_path = self.archive_path(paths=paths)
+		if os.path.exists(archive_path) and force is False:
+			return False
+		logging.info('Updating archive for %s@%s' % (self.name, self.revision))
+		archive_tmp = self.archive_path(paths=paths, temp=True)
+		self.repo.export(archive_tmp, self.revision, paths=paths)
+		os.rename(archive_tmp, archive_path)
+
+def _load_pin_at(*, pin_name, pin_path):
+	try:
+		with open(pin_path) as f:
+			return Pin.from_json(pin_name, json.load(f))
+	except RuntimeError as e:
+		logger.error("Error loading %s: %s", pin_path, e)
+		raise
+
+def load_pin(name, *, paths):
+	pins_path = paths.pins
+	pin_filename = name + JSON_EXT
+	return _load_pin_at(pin_name=name, pin_path=os.path.join(pins_path, pin_filename))
+
+def load_pins(paths):
+	pins_path = paths.pins
+	pin_files = os.listdir(pins_path)
+
+	pin_specs = []
+	for pin_filename in sorted(pin_files):
+		pin_name, ext = os.path.splitext(pin_filename)
+		if ext != JSON_EXT:
+			logger.debug("skipping %s", pin_filename)
+			continue
+		pin_path = os.path.join(pins_path, pin_filename)
+		pin = _load_pin_at(pin_name=pin_name, pin_path=pin_path)
+		pin_specs.append(pin)
+	return pin_specs
+
+def setup(paths, args):
+	if args is None:
+		force = False
+	else:
+		force = args.force
+	pin_specs = load_pins(paths=paths)
+
+	# make sure we've got all the archives we need
+	for pin in pin_specs:
+		pin.populate_archive(paths=paths, force=force)
+
+	# now clean up old archives
+	cleanup_archive_paths(paths=paths, specs=pin_specs)
+
+	# now write the single nix file which imports all pins:
+	pin_expr = os.path.join(paths.config, 'pins.nix')
+	pin_expr_tmp = pin_expr + '.tmp'
+	with open(pin_expr_tmp, 'w') as dest:
+		dest.write('{ lib, importFromArchive }: {\n')
+		for pin in pin_specs:
+			dest.write('  \"%s\" = %s;\n' % (pin.name, pin.to_nix(paths=paths)))
+		dest.write('}\n')
+	os.rename(pin_expr_tmp, pin_expr)
+
+def info(paths, args):
+	pin_specs = load_pins(paths=paths)
+	print("%s pin(s) configured" % len(pin_specs))
+	for pin in pin_specs:
+		print("  - %s: %s (%s)" % (pin.name, pin.revision[:8], pin.repo.description(paths=paths)))
+
+class Paths(object):
+	def __init__(self, home):
+		assert home is not None, '--home required'
+		assert os.path.exists(home), '%s does not exist' % (home)
+		self.home = home
+		self._config = os.path.join(home, '.config', 'nix-pin')
+		self._cache = os.path.join(home, '.cache', 'nix-pin')
+
+	@property
+	def config(self): return self._ensure(self._config)
+
+	@property
+	def cache(self): return self._ensure(self._cache)
+
+	@property
+	def pins(self): return self._ensure(os.path.join(self._config, 'pins'))
+
+	def _ensure(self, path):
+		try:
+			os.makedirs(path)
+			logging.debug("Created %s", path)
+		except OSError as e:
+			if e.errno != errno.EEXIST:
+				raise
+		return path
+
+def cleanup_archive_paths(*, paths, specs):
+	expected_paths = set([pin.archive_filename for pin in specs])
+	extant_paths = set(os.listdir(paths.cache))
+	unexpected_paths = extant_paths.difference(expected_paths)
+	for path in unexpected_paths:
+		full_path = os.path.join(paths.cache, path)
+		logging.info("removing cache path %s", full_path)
+		os.unlink(full_path)
+
+def update_action(paths, args):
+	revision = args.revision
+	pin = load_pin(args.pin, paths=paths)
+	old_rev = pin.revision
+	logging.info('Updating: %s ...' % (pin.name,))
+	new_rev = pin.repo.update_revision(args.revision, paths=paths)
+	if old_rev == new_rev:
+		logging.info(" - %s unchanged (%s)" % (pin.name, old_rev))
+	else:
+		logging.info(" - %s: %s (from %s)" % (pin.name, old_rev, new_rev))
+		pin.setattr('revision', new_rev)
+		dest = pin.json_path(paths=paths)
+		tmp_dest = dest + '.tmp'
+		with open(tmp_dest, 'w') as f:
+			json.dump(pin.to_json(), f, indent=2, separators=(',', ': '))
+		os.rename(tmp_dest, dest)
+	setup(paths, None)
+
+def default_action(*, paths, args):
+	setup(paths, args=None)
+	info(paths, args=None)
+
+def main():
+	logging.basicConfig(level=logging.DEBUG)
+	p = argparse.ArgumentParser()
+	p.set_defaults(func=default_action)
+	p.add_argument('--home')
+	p_sub = p.add_subparsers()
+	p.set_defaults(home=os.environ.get('HOME', None))
+
+	p_populate = p_sub.add_parser('setup')
+	p_populate.add_argument('--force', action='store_true')
+	p_populate.set_defaults(func=setup)
+
+	p_update = p_sub.add_parser('update')
+	p_update.add_argument('pin')
+	p_update.add_argument('-r', '--revision')
+	p_update.set_defaults(func=update_action)
+
+	p_info = p_sub.add_parser('status')
+	p_info.set_defaults(func=info)
+
+	args = p.parse_args()
+	paths = Paths(args.home)
+	args.func(paths=paths, args=args)
+
+if __name__ == '__main__':
+	main()

@@ -105,19 +105,11 @@ for each configured pin:
 
 overlay `pkgs` based on attribute(s) from json. provide as `nixPin.pkgs` (TODO: also overridden in ~/nixpkgs/.config.nix ??)
 
-# pin.nix (in-tree) implementation:
-
-{ pkgs, nix-pin }:
-pkgs.nix-pin.callPin "vdoml" ./default.nix (config: {
-	unix = config.unix or false;
-	srcOverride = config.src; # usually unnecessary - provided by default, since `callPin implicitly does an `overrideDerivation`
-});
-
 To enable pins in a project's nix-shell by default, we can use:
 
 # shell.nix
 { pkgs }:
-pkgs.nixPin.callPackage ./default.nix {
+pkgs.callPin "vdoml" ./default.nix {
 	# ( passes overlaid `pkgs`)
 	# NOTE: this passes attrs through, should there be an alternate callPackage when that's not wanted?
 };
