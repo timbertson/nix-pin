@@ -1,12 +1,15 @@
-{ pkgs, stdenv }:
+{ pkgs, stdenv, mypy, python3 }:
 stdenv.mkDerivation {
-	buildInputs = [ pkgs.python3 ];
+	buildInputs = [ python3 mypy ];
 	name = "nix-pin";
 	version = "0.1.0";
 	src = ./local.tgz;
-	passthru = import ./api.nix { inherit pkgs; };
+	buildPhase = ''
+		mypy bin/*
+	'';
 	installPhase = ''
 		mkdir "$out"
 		cp -r bin "$out"
+		cp -r share "$out"
 	'';
 }

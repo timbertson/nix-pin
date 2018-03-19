@@ -7,9 +7,37 @@ import argparse
 import json
 import logging
 import subprocess
+from typing import List
 
 ARCHIVE_EXT = '.tgz'
 JSON_EXT = '.json'
+
+class Paths(object):
+	def __init__(self, home):
+		assert home is not None, '--home required'
+		assert os.path.exists(home), '%s does not exist' % (home)
+		self.home = home
+		self._config = os.path.join(home, '.config', 'nix-pin')
+		self._cache = os.path.join(home, '.cache', 'nix-pin')
+
+	@property
+	def config(self): return self._ensure(self._config)
+
+	@property
+	def cache(self): return self._ensure(self._cache)
+
+	@property
+	def pins(self): return self._ensure(os.path.join(self._config, 'pins'))
+
+	def _ensure(self, path):
+		try:
+			os.makedirs(path)
+			logging.debug("Created %s", path)
+		except OSError as e:
+			if e.errno != errno.EEXIST:
+				raise
+		return path
+
 
 def nix_of_string(s):
 	#TODO: escaping
@@ -25,13 +53,17 @@ class LocalRepo(object):
 			['git', 'archive', '--format=tgz', '--prefix=git-export/', '--output', dest, revision],
 			cwd = self.repo_path(paths=paths))
 
-	def repo_path(self, *, paths):
+	def repo_path(self, paths: Paths):
 		return self.root.replace('~/', paths.home + '/')
+
+	def validate(self, paths: Paths, pin: 'Pin'):
+		p = os.path.join(self.repo_path(paths), pin.expr_path)
+		assert os.path.exists(p), ("path does not exist: %s" % (p))
 
 	def description(self, *, paths):
 		return self.repo_path(paths=paths)
 
-	def update_revision(self, spec, *, paths):
+	def update_revision(self, spec, *, paths: Paths):
 		def to_sha(bytes):
 			return bytes.decode('ascii').strip()
 
@@ -72,11 +104,29 @@ class Repo(object):
 		else:
 			return RemoteRepo(attrs['url'], attrs.get('branch', None))
 
+class InvalidPin(RuntimeError):
+	def __init__(self, pin, msg):
+		self.pin = pin
+		super(InvalidPin, self).__init__('Invalid pin: %s (%s)' % (pin, msg))
+
 class Pin(object):
 	def __init__(self, name, attrs):
 		self.name = name
 		self.attrs = attrs
 		self.repo = Repo.from_attrs(attrs)
+
+	def validate(self, paths: Paths):
+		try:
+			root = self.attr('root')
+			home_prefix = paths.home + '/'
+			if root.startswith(home_prefix):
+				self.setattr('root', '~/' + root[len(home_prefix):])
+			assert 'revision' in self.attrs
+			if 'path' in self.attrs:
+				assert self.attr('path') is not None
+			self.repo.validate(paths, self)
+		except AssertionError as e:
+			raise InvalidPin(self.name, str(e))
 
 	@classmethod
 	def from_json(cls, name, json):
@@ -105,6 +155,26 @@ class Pin(object):
 	def revision(self):
 		return self.attr('revision')
 
+	def _update_revision(self, old_rev, spec, paths: Paths):
+		logging.info('Updating: %s ...' % (self.name,))
+		new_rev = self.repo.update_revision(spec, paths=paths)
+		if old_rev == new_rev:
+			logging.info(" - %s unchanged (%s)" % (self.name, old_rev))
+			return False
+		else:
+			if old_rev is None:
+				logging.info(" - %s: init at %s" % (self.name, new_rev))
+			else:
+				logging.info(" - %s: updated to %s (from %s)" % (self.name, new_rev, old_rev))
+			self.setattr('revision', new_rev)
+			return True
+
+	def update_revision(self, spec, paths: Paths):
+		return self._update_revision(self.revision, spec, paths)
+
+	def init_revision(self, spec, paths: Paths):
+		return self._update_revision(None, spec, paths)
+
 	@property
 	def archive_filename(self):
 		return self.name + '-' + self.revision + ARCHIVE_EXT
@@ -119,6 +189,10 @@ class Pin(object):
 			filename = filename + '.tmp'
 		return os.path.join(paths.cache, filename)
 
+	@property
+	def expr_path(self):
+		return self.attr_or('path', 'default.nix')
+
 	def to_nix(self, *, paths):
 		return '''
 			rec {{
@@ -130,8 +204,16 @@ class Pin(object):
 		'''.format(
 			src = self.archive_path(paths=paths),
 			jsonPath = self.json_path(paths=paths),
-			drvPath = nix_of_string(self.attr_or('path', 'default.nix'))
+			drvPath = nix_of_string(self.expr_path)
 		)
+
+	def save(self, paths: Paths):
+		self.validate(paths)
+		dest = self.json_path(paths=paths)
+		tmp_dest = dest + '.tmp'
+		with open(tmp_dest, 'w') as f:
+			json.dump(self.to_json(), f, indent=2, separators=(',', ': '))
+		os.rename(tmp_dest, dest)
 
 	def populate_archive(self, *, paths, force=False):
 		archive_path = self.archive_path(paths=paths)
@@ -147,15 +229,15 @@ def _load_pin_at(*, pin_name, pin_path):
 		with open(pin_path) as f:
 			return Pin.from_json(pin_name, json.load(f))
 	except RuntimeError as e:
-		logger.error("Error loading %s: %s", pin_path, e)
+		logging.error("Error loading %s: %s", pin_path, e)
 		raise
 
-def load_pin(name, *, paths):
+def load_pin(name, paths: Paths) -> Pin:
 	pins_path = paths.pins
 	pin_filename = name + JSON_EXT
 	return _load_pin_at(pin_name=name, pin_path=os.path.join(pins_path, pin_filename))
 
-def load_pins(paths):
+def load_pins(paths) -> List[Pin]:
 	pins_path = paths.pins
 	pin_files = os.listdir(pins_path)
 
@@ -163,12 +245,15 @@ def load_pins(paths):
 	for pin_filename in sorted(pin_files):
 		pin_name, ext = os.path.splitext(pin_filename)
 		if ext != JSON_EXT:
-			logger.debug("skipping %s", pin_filename)
+			logging.debug("skipping %s", pin_filename)
 			continue
 		pin_path = os.path.join(pins_path, pin_filename)
 		pin = _load_pin_at(pin_name=pin_name, pin_path=pin_path)
 		pin_specs.append(pin)
 	return pin_specs
+
+def get_pin_expr(paths: Paths):
+	return os.path.join(paths.config, 'pins.nix')
 
 def setup(paths, args):
 	if args is None:
@@ -180,12 +265,13 @@ def setup(paths, args):
 	# make sure we've got all the archives we need
 	for pin in pin_specs:
 		pin.populate_archive(paths=paths, force=force)
+		pin.validate(paths)
 
 	# now clean up old archives
 	cleanup_archive_paths(paths=paths, specs=pin_specs)
 
 	# now write the single nix file which imports all pins:
-	pin_expr = os.path.join(paths.config, 'pins.nix')
+	pin_expr = get_pin_expr(paths)
 	pin_expr_tmp = pin_expr + '.tmp'
 	with open(pin_expr_tmp, 'w') as dest:
 		dest.write('{ lib, importFromArchive }: {\n')
@@ -194,37 +280,11 @@ def setup(paths, args):
 		dest.write('}\n')
 	os.rename(pin_expr_tmp, pin_expr)
 
-def info(paths, args):
+def info(paths: Paths, args):
 	pin_specs = load_pins(paths=paths)
 	print("%s pin(s) configured" % len(pin_specs))
 	for pin in pin_specs:
 		print("  - %s: %s (%s)" % (pin.name, pin.revision[:8], pin.repo.description(paths=paths)))
-
-class Paths(object):
-	def __init__(self, home):
-		assert home is not None, '--home required'
-		assert os.path.exists(home), '%s does not exist' % (home)
-		self.home = home
-		self._config = os.path.join(home, '.config', 'nix-pin')
-		self._cache = os.path.join(home, '.cache', 'nix-pin')
-
-	@property
-	def config(self): return self._ensure(self._config)
-
-	@property
-	def cache(self): return self._ensure(self._cache)
-
-	@property
-	def pins(self): return self._ensure(os.path.join(self._config, 'pins'))
-
-	def _ensure(self, path):
-		try:
-			os.makedirs(path)
-			logging.debug("Created %s", path)
-		except OSError as e:
-			if e.errno != errno.EEXIST:
-				raise
-		return path
 
 def cleanup_archive_paths(*, paths, specs):
 	expected_paths = set([pin.archive_filename for pin in specs])
@@ -237,21 +297,82 @@ def cleanup_archive_paths(*, paths, specs):
 
 def update_action(paths, args):
 	revision = args.revision
-	pin = load_pin(args.pin, paths=paths)
-	old_rev = pin.revision
-	logging.info('Updating: %s ...' % (pin.name,))
-	new_rev = pin.repo.update_revision(args.revision, paths=paths)
-	if old_rev == new_rev:
-		logging.info(" - %s unchanged (%s)" % (pin.name, old_rev))
-	else:
-		logging.info(" - %s: %s (from %s)" % (pin.name, old_rev, new_rev))
-		pin.setattr('revision', new_rev)
-		dest = pin.json_path(paths=paths)
-		tmp_dest = dest + '.tmp'
-		with open(tmp_dest, 'w') as f:
-			json.dump(pin.to_json(), f, indent=2, separators=(',', ': '))
-		os.rename(tmp_dest, dest)
+	for pin_name in args.pins:
+		pin = load_pin(pin_name, paths=paths)
+		if pin.update_revision(args.revision, paths=paths):
+			pin.save(paths)
 	setup(paths, None)
+
+EDITABLE_KEYS = ['root', 'path']
+def attrs_of_args(args):
+	attrs = {}
+	for key in EDITABLE_KEYS:
+		val = getattr(args, key)
+		if val is not None:
+			attrs[key] = val
+	return attrs
+
+def create_action(paths, args):
+	assert args.name, "pin name required"
+	attrs = attrs_of_args(args)
+	pin = Pin(args.name, attrs)
+	pin.init_revision(spec=None, paths=paths)
+	pin.save(paths)
+	logging.info("Created: %r" % attrs)
+	setup(paths, args=None)
+
+def edit_action(paths, args):
+	assert args.name, "pin name required"
+	pin = load_pin(args.name, paths=paths)
+
+	modified = False
+	if args.delete:
+		os.path.unlink(pin.json_path(paths))
+	elif args.rename is not None:
+		pin.name = args.rename
+		pin.save(paths)
+	else:
+		attrs = attrs_of_args(args)
+		if attrs:
+			for key, value in attrs.items():
+				pin.setattr(key, value)
+			pin.save(paths)
+			logging.info("Updated: %r" % attrs)
+		else:
+			logging.warn("Nothing changed")
+			return
+
+	setup(paths, args=None)
+
+def run_action(cmd):
+	def run(paths: Paths, args):
+		expr_path = args.path
+		if expr_path is None:
+			cwd = os.getcwd()
+			# expr_path = os.path.join(cwd, 'default.nix')
+			candidates = ['default.nix']
+			if cmd == 'nix-shell':
+				candidates = ['pin.nix', 'shell.nix'] + candidates
+
+			for candidate in candidates:
+				if os.path.exists(candidate):
+					expr_path = candidate
+					break
+			else:
+				raise RuntimeError("Could not find any of %r in %s" % (candidates, cwd))
+
+		info(paths, args)
+		pin_args = [
+			'--argstr', 'pinPath', os.path.realpath(expr_path),
+			'--argstr', 'pinConfig', get_pin_expr(paths),
+		]
+		here = os.path.dirname(__file__)
+		package_root = os.path.dirname(here)
+		run_path = os.path.join(package_root, 'share', 'nix', 'run.nix')
+		argv = [cmd] + pin_args + args.arguments + [run_path]
+		logging.debug(' + %s' % (' '.join(argv)))
+		os.execvp(cmd, argv)
+	return run
 
 def default_action(*, paths, args):
 	setup(paths, args=None)
@@ -260,26 +381,60 @@ def default_action(*, paths, args):
 def main():
 	logging.basicConfig(level=logging.DEBUG)
 	p = argparse.ArgumentParser()
-	p.set_defaults(func=default_action)
-	p.add_argument('--home')
+	default_home = os.environ.get('HOME', None)
+	p.set_defaults(func=default_action, home=default_home)
 	p_sub = p.add_subparsers()
-	p.set_defaults(home=os.environ.get('HOME', None))
 
-	p_populate = p_sub.add_parser('setup')
+	p_common = argparse.ArgumentParser(add_help=False)
+	p_common.add_argument('--home')
+	p_common.set_defaults(home=default_home)
+
+	p_run_common = argparse.ArgumentParser(add_help=False)
+	p_run_common.add_argument('--path')
+	p_run_common.add_argument('arguments', nargs='*')
+
+	p_populate = p_sub.add_parser('setup', parents=[p_common])
 	p_populate.add_argument('--force', action='store_true')
 	p_populate.set_defaults(func=setup)
 
-	p_update = p_sub.add_parser('update')
-	p_update.add_argument('pin')
+	p_create = p_sub.add_parser('create', parents=[p_common])
+	p_create.add_argument('name')
+	p_create.add_argument('root')
+	p_create.add_argument('-p', '--path')
+	p_create.set_defaults(func=create_action)
+
+	p_update = p_sub.add_parser('update', parents=[p_common])
+	p_update.add_argument('pins', nargs='+')
 	p_update.add_argument('-r', '--revision')
 	p_update.set_defaults(func=update_action)
 
-	p_info = p_sub.add_parser('status')
+	p_shell = p_sub.add_parser('shell', parents=[p_common, p_run_common])
+	p_shell.set_defaults(func=run_action('nix-shell'))
+
+	p_build = p_sub.add_parser('build', parents=[p_common, p_run_common])
+	p_build.set_defaults(func=run_action('nix-build'))
+
+	p_exec = p_sub.add_parser('exec', parents=[p_common, p_run_common])
+	p_exec.set_defaults(func=run_action('nix-build'))
+
+	p_info = p_sub.add_parser('status', parents=[p_common])
 	p_info.set_defaults(func=info)
 
-	args = p.parse_args()
-	paths = Paths(args.home)
-	args.func(paths=paths, args=args)
+	p_edit = p_sub.add_parser('edit', parents=[p_common])
+	p_edit.set_defaults(func=edit_action)
+	p_edit.add_argument('name')
+	p_edit.add_argument('--root')
+	p_edit.add_argument('--path')
+	p_edit.add_argument('--delete', action='store_true')
+	p_edit.add_argument('--rename')
+
+	try:
+		args = p.parse_args()
+		paths = Paths(args.home)
+		args.func(paths=paths, args=args)
+	except InvalidPin as e:
+		print(str(e), file=sys.stderr)
+		sys.exit(1)
 
 if __name__ == '__main__':
 	main()

@@ -1,2 +1,2 @@
-with (import <nixpkgs> {}):;
-callPackage ./nix/default.nix
+with (import <nixpkgs> {});
+callPackage ./nix/default.nix {}
