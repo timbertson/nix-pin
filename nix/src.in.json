@@ -1,0 +1,6 @@
+{
+	"type": "fetchFromGitHub",
+	"repo": "nix-pin",
+	"owner": "timbertson",
+	"rev": "version-{version}"
+}

@@ -1,0 +1,7 @@
+#!bash -eu
+# phony target which modifies default.nix
+"$(nix-build --no-out-link -A nix-update-source '<nixpkgs>')"/bin/nix-update-source \
+	--modify-nix=default.nix src.in.json \
+	--replace-attr version \
+	--set version "$(cat ../VERSION)" \
+	;
