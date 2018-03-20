@@ -1,4 +1,9 @@
-{ pkgs ? import <nixpkgs> {}, pinPath, pinConfig, callArgs ? {}}:
+{
+	pkgs ? import <nixpkgs> {},
+	pinConfig ? "${builtins.getEnv "HOME"}/.config/nix-pin/pins.nix",
+	path,
+	args ? {}
+}:
 
 let
 	lib = pkgs.lib;
@@ -49,4 +54,4 @@ let
 	augmentedPkgs = import pkgs.path { overlays = [
 		(import ./overlay.nix { inherit callPins; }) ]; };
 in
-augmentedPkgs.callPackage pinPath callArgs
+augmentedPkgs.callPackage path args
