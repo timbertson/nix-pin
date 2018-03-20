@@ -32,11 +32,24 @@ All of these problems can be achieved by forking `nixpkgs` and using your local 
 ### build / shell
 
 ```
-nix-pin build [--path path/to/default.nix] [ ... ]
-nix-pin shell [--path path/to/default.nix] [ ... ]
+nix-pin [build|shell] [--path path/to/default.nix] [ ... ]
 ```
 
 Like `nix-build` / `nix-shell`, but with all pins activated. A note is printed for each pin which is being used.
+
+# When is a pin used?
+
+Any time callPackage is used, there are two sets of arguments - the implicit arguments which are taken from the scope if needed, and the explicit argument. e.g:
+
+```
+pkgs.callPackage default.nix { foo = true; }
+```
+
+In this case `pkgs` are the implicit arguments, and `foo` is the only explicit argument.
+
+Under `nix-pin`, all your activated pins are injected with higher priority than the scope, but lower priority than explicit arguments. You should name your pins consistently with the packages they represent, since pins are activated for all `callPackage` invocations by default.
+
+TODO: this is a little brittle (possibility of name collisions), and the implementation relies on nixpkgs internals.
 
 ### manage pins:
 
@@ -59,8 +72,10 @@ TODO, nothing is registered as a GC root yet. Pinned packages will be pruned on 
 
 To enable pins in a project's nix-shell by default, we can use:
 
+```
 # shell.nix
 with (import <nixpkgs> {}):
 nixPin.callWithPins ./default.nix {}
+```
 
 (but you can also just use `nix-pin shell` without explicitly referencing nixPin in your expression)
