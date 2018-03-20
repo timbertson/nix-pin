@@ -22,7 +22,7 @@ If `libFoo` depends on `libBar`, you may need to make changes to `libBar` by bui
 
 ### "Just fork nixpkgs"
 
-All of these problems can be achieved by forking `nixpkgs` and using your local version, replacing real sources with locally-built tarballs from development sources, etc. There are two problems with this:
+All of these problems can be achieved by forking `nixpkgs` and using your local version, replacing real sources with locally-built tarballs from development sources, etc. But there are a number of problems with this:
 
  - You can't use `nix-channel`
  - There's no good workflow (that I know of). Building tarballs for specific in-development versions and using them in `src` attributes is tedious and easy to forget a step unless you script it, but it's also not well-suited to a generic scripting approach.
