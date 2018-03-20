@@ -1,6 +1,6 @@
-Nixpin:
+# nix-pin:
 
-# Why?
+### Why?
 
 Nixpkgs is a great set of canonical packages. But when working on one or more development versions of packages, it can be awkward.
 
@@ -8,11 +8,11 @@ Examples:
 
 ### `libfoo`'s nix expression doesn't live with the `libfoo` source code
 
-The canonical version of `libfoo/default.nix` lives in nixpkgs, but if you're the author of `libfoo` you would probably prefer to maintain this file in your source tree. That way, you have the correct build instructions for the actual version you're developing, without having to merge in-development changes into `nixpkgs`.
+The canonical version of `libfoo/default.nix` lives in nixpkgs, but if you're the author of `libfoo` you likely want to maintain this file in your source tree. That way, you have the correct build instructions for the actual version you're developing, without having to merge in-development changes into `nixpkgs`.
 
 ### Testing a full `nix-build` of your master branch
 
-`nix-shell` works well for development changes, but you should also test that a full `nix-build` works, particularly if you're changing the build process. By default, this builds the archive specified in your nix expression, which is typically a release tarball. It's awkward to refer to "the current checkout" in a clean way. If you just use `./`, your entire workspace is copied into the /nix store every time you change anything. You also need to remember to replace this with a real `src` attribute for release. And finally, using a directory in development and a tarball for release can cause build inconsistencies.
+`nix-shell` works well for development changes, but you should also test that a full `nix-build` works, particularly if you're changing the build process. By default, this builds the archive specified in your nix expression, which is typically a release tarball. It's awkward to refer to "the current checkout" in a clean way. If you just use `./`, your entire workspace is copied into the /nix store every time you change anything. You also need to remember to set this back to a real `src` attribute for release. And finally, using a directory in development and a tarball for release can cause build inconsistencies.
 
 ### Testing multiple inter-dependent packages
 
@@ -24,8 +24,25 @@ If `libFoo` depends on `libBar`, you may need to make changes to `libBar` by bui
 
 All of these problems can be achieved by forking `nixpkgs` and using your local version, replacing real sources with locally-built tarballs from development sources, etc. There are two problems with this:
 
- - There's no good workflow (that I know of). Building tarballs for specific in-development versions and using them in `src` attributes is tedious and easy to forget a step unless you script it (but this is difficult since the set of packages you care about overriding changes depending on what you're working on).
+ - You can't use `nix-channel`
+ - There's no good workflow (that I know of). Building tarballs for specific in-development versions and using them in `src` attributes is tedious and easy to forget a step unless you script it, but it's also not well-suited to a generic scripting approach.
  - It doesn't compose. If you're working on multiple open source projects which take this approach, you'll end up with multiple long-running branches of `nixpkgs`. If you want to integrate multiple projects, you'll need to be handy with `git merge` and hope that the individual `nixpkgs` versions used actually vaguely compatible. It's also very hard to see what packages diverge from their upstream versions after a few merges.
+
+# Rationale
+
+The name comes from the `pin` functionality in `opam` and other package managers. The idea is that you mostly use the official repository for your packages, but sometimes you need to "pin" a given package to a specific version (or directory). This lets you pretend your local version is the official one, allowing you to test out packaging actions and inject your modified version into dependant packages.
+
+# When is a pin used?
+
+Any time `callPackage` is used, there are two sets of arguments - the implicit arguments which are taken from the scope as needed, and the explicit argument. e.g:
+
+```
+pkgs.callPackage default.nix { foo = true; }
+```
+
+In this case `pkgs` are the implicit arguments, and `foo` is the only explicit argument.
+
+Under `nix-pin`, all your active pins are injected with higher priority than the scope, but lower priority than explicit arguments. Note that the pin name becomes the argument name - if you call a pin "foo", then it will automatically be substituted for _every_ `foo` in _every_ `callPackage` invocation. Typically names are unique enough that you're unlikely to encounter a naming conflict, although you may encounter issues if this is not the case. (TODO: are there ways to scope this injection more finely?)
 
 # Usage:
 
@@ -36,20 +53,6 @@ nix-pin [build|shell] [--path path/to/default.nix] [ ... ]
 ```
 
 Like `nix-build` / `nix-shell`, but with all pins activated. A note is printed for each pin which is being used.
-
-# When is a pin used?
-
-Any time callPackage is used, there are two sets of arguments - the implicit arguments which are taken from the scope if needed, and the explicit argument. e.g:
-
-```
-pkgs.callPackage default.nix { foo = true; }
-```
-
-In this case `pkgs` are the implicit arguments, and `foo` is the only explicit argument.
-
-Under `nix-pin`, all your activated pins are injected with higher priority than the scope, but lower priority than explicit arguments. You should name your pins consistently with the packages they represent, since pins are activated for all `callPackage` invocations by default.
-
-TODO: this is a little brittle (possibility of name collisions), and the implementation relies on nixpkgs internals.
 
 ### manage pins:
 
