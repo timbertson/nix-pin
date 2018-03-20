@@ -232,6 +232,14 @@ def _load_pin_at(*, pin_name, pin_path):
 		logging.error("Error loading %s: %s", pin_path, e)
 		raise
 
+def load_pin_for(root, paths: Paths) -> Pin:
+	all_pins = load_pins(paths)
+	for pin in all_pins:
+		if os.path.samefile(pin.repo.repo_path(paths), root):
+			logging.debug('found pin %s for directory %s' % (pin.name, root))
+			return pin
+	assert False, "No pin found for %s" % (root)
+
 def load_pin(name, paths: Paths) -> Pin:
 	pins_path = paths.pins
 	pin_filename = name + JSON_EXT
@@ -297,11 +305,23 @@ def cleanup_archive_paths(*, paths, specs):
 
 def update_action(paths, args):
 	revision = args.revision
-	for pin_name in args.pins:
-		pin = load_pin(pin_name, paths=paths)
+	changed = False
+	pins = []
+	if not args.pins:
+		pins.append(load_pin_for(os.getcwd(), paths))
+	else:
+		for name in args.pins:
+			if name == '.':
+				pins.append(load_pin_for(os.getcwd(), paths))
+			else:
+				pins.append(load_pin(name, paths=paths))
+	for pin in pins:
 		if pin.update_revision(args.revision, paths=paths):
 			pin.save(paths)
-	setup(paths, None)
+			changed = True
+
+	if changed:
+		setup(paths, None)
 
 EDITABLE_KEYS = ['root', 'path']
 def attrs_of_args(args):
@@ -369,9 +389,12 @@ def run_action(cmd):
 		here = os.path.dirname(__file__)
 		package_root = os.path.dirname(here)
 		run_path = os.path.join(package_root, 'share', 'nix', 'run.nix')
-		argv = [cmd] + pin_args + args.arguments + [run_path]
+		argv = args.unknown_args + pin_args + [run_path]
+		if cmd is not None:
+			argv = [cmd] + argv
 		logging.debug(' + %s' % (' '.join(argv)))
-		os.execvp(cmd, argv)
+		os.execvp(argv[0], argv)
+	run.allow_unknown_args = True
 	return run
 
 def default_action(*, paths, args):
@@ -380,7 +403,7 @@ def default_action(*, paths, args):
 
 def main():
 	logging.basicConfig(level=logging.DEBUG)
-	p = argparse.ArgumentParser()
+	p = argparse.ArgumentParser(allow_abbrev=False)
 	default_home = os.environ.get('HOME', None)
 	p.set_defaults(func=default_action, home=default_home)
 	p_sub = p.add_subparsers()
@@ -391,7 +414,6 @@ def main():
 
 	p_run_common = argparse.ArgumentParser(add_help=False)
 	p_run_common.add_argument('--path')
-	p_run_common.add_argument('arguments', nargs='*')
 
 	p_populate = p_sub.add_parser('setup', parents=[p_common])
 	p_populate.add_argument('--force', action='store_true')
@@ -404,7 +426,7 @@ def main():
 	p_create.set_defaults(func=create_action)
 
 	p_update = p_sub.add_parser('update', parents=[p_common])
-	p_update.add_argument('pins', nargs='+')
+	p_update.add_argument('pins', nargs='*')
 	p_update.add_argument('-r', '--revision')
 	p_update.set_defaults(func=update_action)
 
@@ -415,7 +437,7 @@ def main():
 	p_build.set_defaults(func=run_action('nix-build'))
 
 	p_exec = p_sub.add_parser('exec', parents=[p_common, p_run_common])
-	p_exec.set_defaults(func=run_action('nix-build'))
+	p_exec.set_defaults(func=run_action(None))
 
 	p_info = p_sub.add_parser('status', parents=[p_common])
 	p_info.set_defaults(func=info)
@@ -429,7 +451,16 @@ def main():
 	p_edit.add_argument('--rename')
 
 	try:
-		args = p.parse_args()
+		args, unknown_args = p.parse_known_args()
+		allow_unknown_args = getattr(args.func, 'allow_unknown_args', False)
+		if unknown_args and not allow_unknown_args:
+			# re-parse to throw
+			args = p.parse_args()
+			assert False
+		args.unknown_args = unknown_args
+		# kwargs = {}
+		# if allow_unknown_args:
+		# 	kwargs['unknown_args'] = unknown_args
 		paths = Paths(args.home)
 		args.func(paths=paths, args=args)
 	except InvalidPin as e:

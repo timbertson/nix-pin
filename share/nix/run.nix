@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> {}, pinPath, pinConfig}:
+{ pkgs ? import <nixpkgs> {}, pinPath, pinConfig, callArgs ? {}}:
 
 let
 	lib = pkgs.lib;
@@ -16,7 +16,11 @@ let
 		in
 		"${drv}/${path}";
 
-	pinSpecs = import pinConfig { inherit lib importFromArchive; };
+		pinSpecs = if builtins.pathExists pinConfig
+			then
+				(import pinConfig { inherit lib importFromArchive; })
+			else
+				{};
 
 	warnPinEvaluated = name: pin: val:
 		lib.info
@@ -37,22 +41,12 @@ let
 						pinArgs = argIntersection (pins // pin.attrs);
 						drv = warnPinEvaluated name pin (callPackage drvFn pinArgs);
 					in
-					overrideSource pin drv # TODO
-					# drv
+					overrideSource pin drv
 			) pinSpecs;
 		in
 		pins;
 
-	# withPinSpec = name: pinFn: default:
-	# 	with lib;
-	# 	if (hasAttr name pinSpecs)
-	# 	then pinFn (getAttr name pinSpecs)
-	# 	else default;
-
-	# pins = callPins pkgs.callPackage;
-
 	augmentedPkgs = import pkgs.path { overlays = [
-		(import ../../nix/nixpin-impl-overlay.nix)
 		(import ./overlay.nix { inherit callPins; }) ]; };
 in
-augmentedPkgs.callPackage pinPath {}
+augmentedPkgs.callPackage pinPath callArgs
