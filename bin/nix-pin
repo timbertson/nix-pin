@@ -383,13 +383,13 @@ def run_action(cmd):
 
 		info(paths, args)
 		pin_args = [
-			'--argstr', 'pinPath', os.path.realpath(expr_path),
+			'--argstr', 'path', os.path.realpath(expr_path),
 			'--argstr', 'pinConfig', get_pin_expr(paths),
 		]
 		here = os.path.dirname(__file__)
 		package_root = os.path.dirname(here)
-		run_path = os.path.join(package_root, 'share', 'nix', 'run.nix')
-		argv = args.unknown_args + pin_args + [run_path]
+		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
+		argv = pin_args + args.unknown_args + [run_path]
 		if cmd is not None:
 			argv = [cmd] + argv
 		logging.debug(' + %s' % (' '.join(argv)))
