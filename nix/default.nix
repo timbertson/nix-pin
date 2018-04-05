@@ -22,4 +22,11 @@ let self = stdenv.mkDerivation rec {
         inherit pkgs path args;
       };
   };
+  meta = with stdenv.lib; {
+    homepage = "https://github.com/timbertson/nix-pin";
+    description = "nixpkgs development utility";
+    license = licenses.mit;
+    maintainers = [ maintainers.timbertson ];
+    platforms = platforms.all;
+  };
 }; in self
