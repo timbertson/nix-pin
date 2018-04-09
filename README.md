@@ -78,7 +78,7 @@ To enable pins in a project's nix-shell by default, we can use:
 ```
 # shell.nix
 with (import <nixpkgs> {}):
-nixPin.callWithPins ./default.nix {}
+nix-pin.callWithPins ./default.nix {}
 ```
 
-(but you can also just use `nix-pin shell` without explicitly referencing nixPin in your expression)
+(but you can also just use `nix-pin shell` without explicitly referencing nix-pin in your expression)
