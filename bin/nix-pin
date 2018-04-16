@@ -118,9 +118,12 @@ class Pin(object):
 	def validate(self, paths: Paths):
 		try:
 			root = self.attr('root')
-			home_prefix = paths.home + '/'
-			if root.startswith(home_prefix):
-				self.setattr('root', '~/' + root[len(home_prefix):])
+			if not (os.path.isabs(root) or root.startswith('~')):
+				# path may need normalizing
+				root = os.path.realpath(root)
+				home_prefix = paths.home + '/'
+				if root.startswith(home_prefix):
+					self.setattr('root', '~/' + root[len(home_prefix):])
 			assert 'revision' in self.attrs
 			if 'path' in self.attrs:
 				assert self.attr('path') is not None
@@ -232,13 +235,18 @@ def _load_pin_at(*, pin_name, pin_path):
 		logging.error("Error loading %s: %s", pin_path, e)
 		raise
 
-def load_pin_for(root, paths: Paths) -> Pin:
+def load_pin_for_opt(root, paths: Paths) -> Pin:
 	all_pins = load_pins(paths)
 	for pin in all_pins:
 		if os.path.samefile(pin.repo.repo_path(paths), root):
 			logging.debug('found pin %s for directory %s' % (pin.name, root))
 			return pin
-	assert False, "No pin found for %s" % (root)
+	return None
+
+def load_pin_for(root, paths: Paths) -> Pin:
+	pin = load_pin_for_opt(root, paths)
+	assert pin is not None, "No pin found for %s" % (root)
+	return pin
 
 def load_pin(name, paths: Paths) -> Pin:
 	pins_path = paths.pins
@@ -303,6 +311,11 @@ def cleanup_archive_paths(*, paths, specs):
 		logging.info("removing cache path %s", full_path)
 		os.unlink(full_path)
 
+def update_single_pin(pin, revision, paths: Paths):
+	if pin.update_revision(revision, paths=paths):
+		pin.save(paths)
+		setup(paths, None)
+
 def update_action(paths, args):
 	revision = args.revision
 	changed = False
@@ -366,26 +379,56 @@ def edit_action(paths, args):
 
 def run_action(cmd):
 	def run(paths: Paths, args):
-		expr_path = args.path
-		if expr_path is None:
-			cwd = os.getcwd()
-			# expr_path = os.path.join(cwd, 'default.nix')
-			candidates = ['default.nix']
-			if cmd == 'nix-shell':
-				candidates = ['pin.nix', 'shell.nix'] + candidates
-
-			for candidate in candidates:
-				if os.path.exists(candidate):
-					expr_path = candidate
-					break
-			else:
-				raise RuntimeError("Could not find any of %r in %s" % (candidates, cwd))
+		def realpath_opt(path):
+			if path is None:
+				return None
+			return os.path.realpath(path)
 
 		info(paths, args)
-		pin_args = [
-			'--argstr', 'path', os.path.realpath(expr_path),
-			'--argstr', 'pinConfig', get_pin_expr(paths),
-		]
+		build_args = {
+			'buildPath': realpath_opt(args.path),
+			'buildPin': args.pin
+		}
+		args_set = len(list(filter(lambda x: x is not None, build_args.values())))
+		assert args_set <= 1, "Too many build arguments provided"
+		do_update = args.update
+		if do_update is None:
+			do_update = cmd == 'nix-build'
+
+		if args_set == 0:
+			# derive either buildPath or buildPin from cwd:
+			cwd = os.getcwd()
+			pin = load_pin_for_opt(cwd, paths)
+			if pin is not None:
+				build_args['buildPin'] = pin.name
+			else:
+				# not a registered pin path, look for a default expression to build
+				candidates = ['default.nix']
+				if cmd == 'nix-shell':
+					candidates = ['pin.nix', 'shell.nix'] + candidates
+
+				for candidate in candidates:
+					if os.path.exists(candidate):
+						build_args['buildPath'] = realpath_opt(candidate)
+						break
+				else:
+					raise RuntimeError("Could not find any of %r in %s" % (candidates, cwd))
+
+		if do_update:
+			pin_name = build_args['buildPin']
+			if pin_name is not None:
+				logging.info("Updating %s" % (pin_name,))
+				pin = load_pin(pin_name, paths)
+				update_single_pin(pin, revision = args.revision, paths = paths)
+
+		pin_args = [ '--argstr', 'pinConfig', get_pin_expr(paths) ]
+		for k, v in build_args.items():
+			if v is None:
+				pin_args.extend(['--arg', k, 'null'])
+			else:
+				assert isinstance(v, str), "%r is not a string" % (v,)
+				pin_args.extend(['--argstr', k, v])
+
 		here = os.path.dirname(__file__)
 		package_root = os.path.dirname(here)
 		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
@@ -414,6 +457,10 @@ def main():
 
 	p_run_common = argparse.ArgumentParser(add_help=False)
 	p_run_common.add_argument('--path')
+	p_run_common.add_argument('--pin')
+	p_run_common.add_argument('--update', action='store_true', default=None)
+	p_run_common.add_argument('--no-update', dest='update', action='store_false', help="Don't update pin before building")
+	p_run_common.add_argument('--revision', help="Set revision to update to (for --pin, unless --no-update is given)")
 
 	p_populate = p_sub.add_parser('setup', parents=[p_common])
 	p_populate.add_argument('--force', action='store_true')

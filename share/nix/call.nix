@@ -1,8 +1,9 @@
 {
 	pkgs ? import <nixpkgs> {},
 	pinConfig ? "${builtins.getEnv "HOME"}/.config/nix-pin/pins.nix",
-	path,
-	args ? {}
+	buildPin,
+	buildPath,
+	buildArgs ? {} # NOTE: not exposed via nix-pin binary yet
 }:
 
 let
@@ -53,5 +54,12 @@ let
 
 	augmentedPkgs = import pkgs.path { overlays = [
 		(import ./overlay.nix { inherit callPins; }) ]; };
+
+	target =
+		if buildPin != null then (
+			lib.getAttr buildPin (callPins pkgs.callPackage)
+		) else if buildPath != null then (
+			augmentedPkgs.callPackage buildPath buildArgs
+		) else (lib.warn "buildPath or buildPin attribute required" (assert false; null));
 in
-augmentedPkgs.callPackage path args
+	target
