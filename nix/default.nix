@@ -1,12 +1,12 @@
 { pkgs, stdenv, fetchFromGitHub, mypy, python3 }:
 let self = stdenv.mkDerivation rec {
   name = "nix-pin-${version}";
-  version = "0.1.2";
+  version = "0.2.0";
   src = fetchFromGitHub {
     owner = "timbertson";
     repo = "nix-pin";
-    rev = "version-0.1.2";
-    sha256 = "1zwfb5198qzbjwivgiaxbwva9frgrrqaj92nw8vz95yi08pijssh";
+    rev = "version-0.2.0";
+    sha256 = "1mw2g87w45b65wxv2c56sxhnnziyc76a6kh8qfkh9k0hkqd3k74b";
   };
   buildInputs = [ python3 mypy ];
   buildPhase = ''
