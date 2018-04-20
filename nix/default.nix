@@ -16,12 +16,11 @@ let self = stdenv.mkDerivation rec {
     mkdir "$out"
     cp -r bin share "$out"
   '';
-  passthru = {
-    callWithPins = path: args:
-      import "${self}/share/nix/call.nix" {
-        inherit pkgs path args;
-      };
-  };
+  passthru =
+    let api = import "${self}/share/nix/api.nix"; in
+    {
+      inherit (api) augmentedPkgs pins callWithPins;
+    };
   meta = with stdenv.lib; {
     homepage = "https://github.com/timbertson/nix-pin";
     description = "nixpkgs development utility";
