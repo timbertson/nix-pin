@@ -33,7 +33,7 @@ let
 	overrideSource = pin: drv:
 		lib.overrideDerivation drv (o: { src = pin.src; allowSubstitutes = false; });
 
-	callPins = callPackage:
+	callPinsWith = callPackage:
 		let
 			pins = lib.mapAttrs (
 				name: pin:
@@ -49,17 +49,16 @@ let
 		in
 		pins;
 	
-	pins = callPins pkgs.callPackage;
+	pins = callPinsWith pkgs.callPackage;
 
 	augmentedPkgs = import pkgs.path { overlays = [ overlayFn ]; };
 	
-	overlayFn =
-		self: super:
+	overlayFn = self: super:
 		# prevent double-application of nix pin overlay
 		if (super.nixPinOverlayEnabled or false) then {} else
 			let
 				lib = super.lib;
-				pins = callPins self.callPackage;
+				pins = callPinsWith self.callPackage;
 
 				argIntersection = func: args:
 					# don't provide pins which aren't accepted by `func`:
@@ -82,21 +81,17 @@ let
 				newScope = args: super.newScope (args // pins); # pins take precedence over autoArgs
 				callPackages = fn: args: super.callPackages fn ((argIntersection fn pins) // args); # pins take a backseat to explicit args
 				# callPackage = fn: args: withWarning (super.callPackage fn (pins // args)); # pins take a backseat to explicit args
-			}
+			};
 	
-	call = { buildPin, buildPath, buildArgs }:
+	call = { buildPin, buildPath }:
 		if buildPin != null then (
 			lib.getAttr buildPin pins
 		) else if buildPath != null then (
-			base.augmentedPkgs.callPackage buildPath buildArgs
+			augmentedPkgs.callPackage buildPath {}
 		) else (lib.warn "buildPath or buildPin attribute required" (assert false; null));
-
-		callWithPins = path: args: call {
-			buildPath = path;
-			buildArgs = args;
-		};
 in
 {
-	inherit pins augmentedPkgs call callWithPins overlayFn;
+	inherit pins augmentedPkgs call overlayFn;
+	inherit (augmentedPkgs) callPackage;
 }
 

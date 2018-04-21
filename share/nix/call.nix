@@ -2,8 +2,7 @@
 	pkgs ? (import ./defaults.nix).pkgs,
 	pinConfig ? (import ./defaults.nix).pinConfig,
 	buildPin,
-	buildPath,
-	buildArgs ? {} # NOTE: not exposed via nix-pin binary yet
+	buildPath
 }:
 
-(import ./api.nix { inherit pkgs pinConfig; }).call { inherit buildPin buildPath buildArgs; }
+(import ./api.nix { inherit pkgs pinConfig; }).call { inherit buildPin buildPath; }

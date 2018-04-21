@@ -1,2 +1,2 @@
-with (import <nixpkgs> {});
-callPackage ./nix/default.nix {}
+{ pkgs ? import <nixpkgs> {}}:
+pkgs.callPackage ./nix/default.nix {}

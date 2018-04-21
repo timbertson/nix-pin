@@ -19,7 +19,7 @@ let self = stdenv.mkDerivation rec {
   passthru =
     let api = import "${self}/share/nix/api.nix"; in
     {
-      inherit (api) augmentedPkgs pins callWithPins;
+      inherit (api) augmentedPkgs pins callPackage;
     };
   meta = with stdenv.lib; {
     homepage = "https://github.com/timbertson/nix-pin";
