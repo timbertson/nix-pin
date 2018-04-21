@@ -1,12 +1,12 @@
 { pkgs, stdenv, fetchFromGitHub, mypy, python3 }:
 let self = stdenv.mkDerivation rec {
   name = "nix-pin-${version}";
-  version = "0.2.0";
+  version = "0.2.1";
   src = fetchFromGitHub {
     owner = "timbertson";
     repo = "nix-pin";
-    rev = "version-0.2.0";
-    sha256 = "1mw2g87w45b65wxv2c56sxhnnziyc76a6kh8qfkh9k0hkqd3k74b";
+    rev = "version-0.2.1";
+    sha256 = "1az3zjpw6bg77ky6macx13ympfxvd6xcw2kvsy3jpsrw2c70vd1c";
   };
   buildInputs = [ python3 mypy ];
   buildPhase = ''
@@ -17,7 +17,7 @@ let self = stdenv.mkDerivation rec {
     cp -r bin share "$out"
   '';
   passthru =
-    let api = import "${self}/share/nix/api.nix"; in
+    let api = import "${self}/share/nix/api.nix" { inherit pkgs; }; in
     {
       inherit (api) augmentedPkgs pins callPackage;
     };
