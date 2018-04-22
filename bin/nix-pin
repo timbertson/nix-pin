@@ -11,6 +11,7 @@ from typing import List
 
 ARCHIVE_EXT = '.tgz'
 JSON_EXT = '.json'
+DEFAULT_EXPR_PATH = 'default.nix'
 
 class Paths(object):
 	def __init__(self, home):
@@ -194,7 +195,7 @@ class Pin(object):
 
 	@property
 	def expr_path(self):
-		return self.attr_or('path', 'default.nix')
+		return self.attr_or('path', DEFAULT_EXPR_PATH)
 
 	def to_nix(self, *, paths):
 		return '''
@@ -300,7 +301,12 @@ def info(paths: Paths, args):
 	pin_specs = load_pins(paths=paths)
 	print("%s pin(s) configured" % len(pin_specs))
 	for pin in pin_specs:
-		print("  - %s: %s (%s)" % (pin.name, pin.revision[:8], pin.repo.description(paths=paths)))
+		print("  - %s: %s (%s#%s)" % (
+			pin.name,
+			pin.revision[:8],
+			pin.repo.description(paths=paths),
+			pin.expr_path
+		))
 
 def cleanup_archive_paths(*, paths, specs):
 	expected_paths = set([pin.archive_filename for pin in specs])

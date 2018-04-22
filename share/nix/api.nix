@@ -27,7 +27,7 @@ let
 
 	warnPinEvaluated = name: pin: val:
 		lib.info
-			"Using pin: ${name}@${pin.spec.revision} (${pin.spec.root})"
+			"<pin:${name}> ${pin.spec.revision} (${pin.spec.root}#${pin.spec.path or "default.nix"})"
 			val;
 
 	overrideSource = pin: drv:
