@@ -435,7 +435,7 @@ def run_action(cmd):
 				assert isinstance(v, str), "%r is not a string" % (v,)
 				pin_args.extend(['--argstr', k, v])
 
-		here = os.path.dirname(__file__)
+		here = os.path.dirname(os.path.realpath(__file__))
 		package_root = os.path.dirname(here)
 		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
 		argv = pin_args + args.unknown_args + [run_path]
