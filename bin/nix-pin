@@ -41,8 +41,15 @@ class Paths(object):
 
 
 def nix_of_string(s):
-	#TODO: escaping
-	return '"' + s + '"'
+	return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('${', '\\${') + '"'
+
+def args_as_nix(string_values, nix_values):
+	d = {}
+	for k,v in nix_values:
+		d[k] = v
+	for k,v in string_values:
+		d[k] = nix_of_string(v)
+	return '{%s}' % ' '.join(["%s = %s; " % (k,v) for k,v in d.items()])
 
 class LocalRepo(object):
 	is_local = True
@@ -435,6 +442,9 @@ def run_action(cmd):
 				assert isinstance(v, str), "%r is not a string" % (v,)
 				pin_args.extend(['--argstr', k, v])
 
+		pin_args.extend(['--arg', 'callArgs',
+			args_as_nix(string_values=args.argstr, nix_values=args.arg)])
+
 		here = os.path.dirname(os.path.realpath(__file__))
 		package_root = os.path.dirname(here)
 		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
@@ -467,6 +477,9 @@ def main():
 	p_run_common.add_argument('--update', action='store_true', default=None)
 	p_run_common.add_argument('--no-update', dest='update', action='store_false', help="Don't update pin before building")
 	p_run_common.add_argument('--revision', help="Set revision to update to (for --pin, unless --no-update is given)")
+
+	p_run_common.add_argument('--arg', nargs=2, action='append', default=[])
+	p_run_common.add_argument('--argstr', nargs=2, action='append', default=[])
 
 	p_populate = p_sub.add_parser('setup', parents=[p_common])
 	p_populate.add_argument('--force', action='store_true')

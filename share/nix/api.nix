@@ -83,11 +83,11 @@ let
 				# callPackage = fn: args: withWarning (super.callPackage fn (pins // args)); # pins take a backseat to explicit args
 			};
 	
-	call = { buildPin, buildPath }:
+	call = { buildPin, buildPath, callArgs ? {} }:
 		if buildPin != null then (
 			lib.getAttr buildPin pins
 		) else if buildPath != null then (
-			augmentedPkgs.callPackage buildPath {}
+			augmentedPkgs.callPackage buildPath callArgs
 		) else (lib.warn "buildPath or buildPin attribute required" (assert false; null));
 in
 {
