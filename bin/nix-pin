@@ -373,7 +373,7 @@ def edit_action(paths, args):
 
 	modified = False
 	if args.delete:
-		os.path.unlink(pin.json_path(paths))
+		os.unlink(pin.json_path(paths))
 	elif args.rename is not None:
 		pin.name = args.rename
 		pin.save(paths)
