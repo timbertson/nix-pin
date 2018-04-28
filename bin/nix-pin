@@ -430,7 +430,7 @@ def run_action(cmd):
 		if do_update:
 			pin_name = build_args['buildPin']
 			if pin_name is not None:
-				logging.info("Updating %s" % (pin_name,))
+				logging.debug("Updating %s" % (pin_name,))
 				pin = load_pin(pin_name, paths)
 				update_single_pin(pin, revision = args.revision, paths = paths)
 
