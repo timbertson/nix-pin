@@ -1,6 +1,7 @@
+let defaults = import ./defaults.nix; in
 {
-	pkgs ? (import ./defaults.nix).pkgs,
-	pinConfig ? (import ./defaults.nix).pinConfig
+	pkgs ? defaults.pkgs,
+	pinConfig ? defaults.pinConfig
 }:
 
 let
@@ -88,7 +89,7 @@ let
 			lib.getAttr buildPin pins
 		) else if buildPath != null then (
 			augmentedPkgs.callPackage buildPath callArgs
-		) else (lib.warn "buildPath or buildPin attribute required" (assert false; null));
+		) else augmentedPkgs;
 in
 {
 	inherit pins augmentedPkgs call overlayFn;

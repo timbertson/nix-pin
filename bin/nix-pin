@@ -390,12 +390,23 @@ def edit_action(paths, args):
 
 	setup(paths, args=None)
 
+class NixLiteral(object):
+	def __init__(self, value):
+		self.value = value
+	
 def run_action(cmd):
 	def run(paths: Paths, args):
 		def realpath_opt(path):
 			if path is None:
 				return None
-			return os.path.realpath(path)
+			if path.startswith('<') or path.startswith('"'):
+				if path == '<nixpkgs>':
+					return NixLiteral('null')
+				else:
+					logging.info("Treating %r as a path literal" % (path))
+					return NixLiteral(path)
+			else:
+				return os.path.realpath(path)
 
 		info(paths, args)
 		build_args = {
@@ -438,9 +449,12 @@ def run_action(cmd):
 		for k, v in build_args.items():
 			if v is None:
 				pin_args.extend(['--arg', k, 'null'])
-			else:
-				assert isinstance(v, str), "%r is not a string" % (v,)
+			elif isinstance(v, NixLiteral):
+				pin_args.extend(['--arg', k, v.value])
+			elif isinstance(v, str):
 				pin_args.extend(['--argstr', k, v])
+			else:
+				raise AssertionError("%r is not a string" % (v,))
 
 		pin_args.extend(['--arg', 'callArgs',
 			args_as_nix(string_values=args.argstr, nix_values=args.arg)])
@@ -451,7 +465,7 @@ def run_action(cmd):
 		argv = pin_args + args.unknown_args + [run_path]
 		if cmd is not None:
 			argv = [cmd] + argv
-		logging.debug(' + %s' % (' '.join(argv)))
+		logging.info(' + %s' % (' '.join(argv)))
 		os.execvp(argv[0], argv)
 	run.allow_unknown_args = True
 	return run
