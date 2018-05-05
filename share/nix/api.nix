@@ -76,12 +76,13 @@ let
 				#  - newScope: used to build further `callPackage` functions
 				#  - callPackages: callPackage for an attribute set of derivations
 				# These are all (currently) defined in splice.nix.
-				# Note: callPackage is _already_ defined in terms of `self.newScope`, so
-				#       there's no need to override it.
 
 				newScope = args: super.newScope (args // pins); # pins take precedence over autoArgs
 				callPackages = fn: args: super.callPackages fn ((argIntersection fn pins) // args); # pins take a backseat to explicit args
-				# callPackage = fn: args: withWarning (super.callPackage fn (pins // args)); # pins take a backseat to explicit args
+
+				# Note: callPackage is _already_ defined in terms of `self.newScope`, so
+				#       there's no need to override it.
+				# callPackage = fn: args: super.callPackage fn (pins // args); # pins take a backseat to explicit args
 			};
 	
 	call = { buildPin, buildPath, callArgs ? {} }:
