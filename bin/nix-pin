@@ -7,7 +7,7 @@ import argparse
 import json
 import logging
 import subprocess
-from typing import List
+from typing import List, Optional
 
 ARCHIVE_EXT = '.tgz'
 JSON_EXT = '.json'
@@ -243,7 +243,7 @@ def _load_pin_at(*, pin_name, pin_path):
 		logging.error("Error loading %s: %s", pin_path, e)
 		raise
 
-def load_pin_for_opt(root, paths: Paths) -> Pin:
+def load_pin_for_opt(root, paths: Paths) -> Optional[Pin]:
 	all_pins = load_pins(paths)
 	for pin in all_pins:
 		if os.path.samefile(pin.repo.repo_path(paths), root):
