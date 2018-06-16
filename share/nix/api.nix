@@ -32,7 +32,9 @@ let
 			val;
 
 	overrideSource = pin: drv:
-		lib.overrideDerivation drv (o: { src = pin.src; allowSubstitutes = false; });
+		if lib.isDerivation drv then
+			lib.overrideDerivation drv (o: { src = pin.src; allowSubstitutes = false; })
+		else drv;
 
 	callPinsWith = callPackage:
 		let
