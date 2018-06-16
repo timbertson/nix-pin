@@ -334,7 +334,10 @@ def update_action(paths, args):
 	changed = False
 	pins = []
 	if not args.pins:
-		pins.append(load_pin_for(os.getcwd(), paths))
+		if args.all:
+			pins.extend(load_pins(paths))
+		else:
+			pins.append(load_pin_for(os.getcwd(), paths))
 	else:
 		for name in args.pins:
 			if name == '.':
@@ -508,6 +511,7 @@ def main():
 	p_update = p_sub.add_parser('update', parents=[p_common])
 	p_update.add_argument('pins', nargs='*')
 	p_update.add_argument('-r', '--revision')
+	p_update.add_argument('-a', '--all', action='store_true')
 	p_update.set_defaults(func=update_action)
 
 	p_shell = p_sub.add_parser('shell', parents=[p_common, p_run_common])
