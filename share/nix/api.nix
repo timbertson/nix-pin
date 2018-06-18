@@ -31,9 +31,9 @@ let
 			"<pin:${name}> ${pin.spec.revision} (${pin.spec.root}#${pin.spec.path or "default.nix"})"
 			val;
 
-	overrideSource = pin: drv:
+	overrideSource = src: drv:
 		if lib.isDerivation drv then
-			lib.overrideDerivation drv (o: { src = pin.src; allowSubstitutes = false; })
+			lib.overrideDerivation drv (o: { inherit src; allowSubstitutes = false; })
 		else drv;
 
 	callPinsWith = callPackage:
@@ -47,7 +47,7 @@ let
 						pinArgs = argIntersection (pins // pin.attrs);
 						drv = warnPinEvaluated name pin (callPackage drvFn pinArgs);
 					in
-					overrideSource pin drv
+					overrideSource pin.src drv
 			) pinSpecs;
 		in
 		pins;
@@ -95,7 +95,7 @@ let
 		) else augmentedPkgs;
 in
 {
-	inherit pins augmentedPkgs call overlayFn;
+	inherit pins augmentedPkgs call overlayFn overrideSource;
 	inherit (augmentedPkgs) callPackage;
 }
 
