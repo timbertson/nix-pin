@@ -315,6 +315,11 @@ def info(paths: Paths, args):
 			pin.expr_path
 		))
 
+def list_action(paths, args):
+	pin_specs = load_pins(paths=paths)
+	for pin in pin_specs:
+		print(pin.name)
+
 def cleanup_archive_paths(*, paths, specs):
 	expected_paths = set([pin.archive_filename for pin in specs])
 	extant_paths = set(os.listdir(paths.cache))
@@ -513,6 +518,9 @@ def main():
 	p_update.add_argument('-r', '--revision')
 	p_update.add_argument('-a', '--all', action='store_true')
 	p_update.set_defaults(func=update_action)
+
+	p_create = p_sub.add_parser('list', parents=[p_common])
+	p_create.set_defaults(func=list_action)
 
 	p_shell = p_sub.add_parser('shell', parents=[p_common, p_run_common])
 	p_shell.set_defaults(func=run_action('nix-shell'))
