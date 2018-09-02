@@ -402,7 +402,7 @@ class NixLiteral(object):
 	def __init__(self, value):
 		self.value = value
 	
-def run_action(cmd):
+def run_action(exe):
 	def run(paths: Paths, args):
 		def realpath_opt(path):
 			if path is None:
@@ -425,7 +425,7 @@ def run_action(cmd):
 		assert args_set <= 1, "Too many build arguments provided"
 		do_update = args.update
 		if do_update is None:
-			do_update = cmd == 'nix-build'
+			do_update = exe == 'nix-build'
 
 		if args_set == 0:
 			# derive either buildPath or buildPin from cwd:
@@ -436,7 +436,7 @@ def run_action(cmd):
 			else:
 				# not a registered pin path, look for a default expression to build
 				candidates = ['default.nix']
-				if cmd == 'nix-shell':
+				if exe == 'nix-shell':
 					candidates = ['pin.nix', 'shell.nix'] + candidates
 
 				for candidate in candidates:
@@ -470,11 +470,16 @@ def run_action(cmd):
 		here = os.path.dirname(os.path.realpath(__file__))
 		package_root = os.path.dirname(here)
 		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
-		argv = pin_args + args.unknown_args + [run_path]
-		if cmd is not None:
-			argv = [cmd] + argv
-		logging.info(' + %s' % (' '.join(argv)))
-		os.execvp(argv[0], argv)
+
+		if exe is None:
+			cmd = args.unknown_args
+		else:
+			cmd = [exe] + args.unknown_args
+
+		cmd = cmd + pin_args + [run_path]
+
+		logging.info(' + %s' % (' '.join(cmd)))
+		os.execvp(cmd[0], cmd)
 	run.allow_unknown_args = True
 	return run
 

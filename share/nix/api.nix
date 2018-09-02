@@ -20,11 +20,11 @@ let
 		in
 		"${drv}/${path}";
 
-		pinSpecs = if builtins.pathExists pinConfig
-			then
-				(import pinConfig { inherit lib importFromArchive; })
-			else
-				{};
+	pinSpecs = if builtins.pathExists pinConfig
+		then
+			(import pinConfig { inherit lib importFromArchive; })
+		else
+			{};
 
 	warnPinEvaluated = name: pin: val:
 		lib.info
