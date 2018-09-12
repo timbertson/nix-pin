@@ -22,7 +22,26 @@ let
 
 	pinSpecs = if builtins.pathExists pinConfig
 		then
-			(import pinConfig { inherit lib importFromArchive; })
+			let
+				parseEnvList = name: lib.filter (x: x != "") (lib.splitString ":" (builtins.getEnv name));
+				included = parseEnvList "NIX_PIN_INCLUDE";
+				excluded = parseEnvList "NIX_PIN_EXCLUDE";
+				matchesAny = specs: name: lib.any (spec: spec == "*" || name == spec) specs;
+				shouldInclude = (if included == [] then lib.const true else matchesAny included);
+				shouldExclude = matchesAny excluded;
+				allPins = import pinConfig { inherit lib importFromArchive; };
+				filteredPins = lib.filterAttrs (name: value:
+					if shouldInclude name then (
+						if shouldExclude name then
+							lib.info "<pin-excluded:${name}> by $NIX_PIN_EXCLUDE" false
+						else
+						true
+					) else (
+						lib.info "<pin-excluded:${name}> by $NIX_PIN_INCLUDE" false
+					)
+				) allPins;
+			in
+			filteredPins
 		else
 			{};
 

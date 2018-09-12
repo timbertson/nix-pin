@@ -478,7 +478,22 @@ def run_action(exe):
 
 		cmd = cmd + pin_args + [run_path]
 
-		logging.info(' + %s' % (' '.join(cmd)))
+		env = {}
+		if args.include:
+			env['NIX_PIN_INCLUDE'] = ':'.join(args.include)
+		if args.exclude:
+			env['NIX_PIN_EXCLUDE'] = ':'.join(args.exclude)
+
+		cmd_prefix = []
+		if env:
+			pairs = list(sorted(env.items()))
+			cmd_prefix = ['env']
+			for k,v in pairs:
+				cmd_prefix.append("%s=%s" % (k,v))
+				# OK to mutate since we've about to execve
+				os.environ[k] = v
+
+		logging.info(' + %s' % (' '.join(cmd_prefix + cmd)))
 		os.execvp(cmd[0], cmd)
 	run.allow_unknown_args = True
 	return run
@@ -504,6 +519,9 @@ def main():
 	p_run_common.add_argument('--update', action='store_true', default=None)
 	p_run_common.add_argument('--no-update', dest='update', action='store_false', help="Don't update pin before building")
 	p_run_common.add_argument('--revision', help="Set revision to update to (for --pin, unless --no-update is given)")
+
+	p_run_common.add_argument('--exclude', action='append', default=[])
+	p_run_common.add_argument('--include', action='append', default=[])
 
 	p_run_common.add_argument('--arg', nargs=2, action='append', default=[])
 	p_run_common.add_argument('--argstr', nargs=2, action='append', default=[])
