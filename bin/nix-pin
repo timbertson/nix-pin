@@ -20,6 +20,8 @@ class Paths(object):
 		self.home = home
 		self._config = os.path.join(home, '.config', 'nix-pin')
 		self._cache = os.path.join(home, '.cache', 'nix-pin')
+		here = os.path.dirname(os.path.realpath(__file__))
+		self.package_root = os.path.dirname(here)
 
 	@property
 	def config(self): return self._ensure(self._config)
@@ -320,6 +322,41 @@ def list_action(paths, args):
 	for pin in pin_specs:
 		print(pin.name)
 
+def run_with_env(env, cmd):
+	cmd_prefix = []
+	if env:
+		pairs = list(sorted(env.items()))
+		cmd_prefix = ['env']
+		for k,v in pairs:
+			cmd_prefix.append("%s=%s" % (k,v))
+			# OK to mutate since we've about to execve
+			os.environ[k] = v
+
+	logging.info(' + %s' % (' '.join(cmd_prefix + cmd)))
+	os.execvp(cmd[0], cmd)
+
+def env_action(paths, args):
+	# TODO: we could probably parse it ourselves
+	original_nixpkgs = subprocess.check_output(['nix-instantiate', '--eval', '--expr', '<nixpkgs>']).decode('utf-8').strip()
+	nix_path=os.environ.get('NIX_PATH')
+	if nix_path is None:
+		nix_path = []
+	else:
+		nix_path = [nix_path]
+
+	stub_path = os.path.join(paths.package_root, 'share', 'nix', 'nixpkgs')
+	nixpkgs_override = [
+		'nixpkgs-without-pins=' + original_nixpkgs,
+		'nixpkgs=' + stub_path
+	]
+
+	env = {}
+	env['NIX_PATH'] = ':'.join(nixpkgs_override + nix_path)
+	env['NIX_PIN_CONFIG'] = get_pin_expr(paths)
+	populate_include_exclude(args, env)
+	run_with_env(env, args.unknown_args)
+env_action.allow_unknown_args = True
+
 def cleanup_archive_paths(*, paths, specs):
 	expected_paths = set([pin.archive_filename for pin in specs])
 	extant_paths = set(os.listdir(paths.cache))
@@ -401,7 +438,13 @@ def edit_action(paths, args):
 class NixLiteral(object):
 	def __init__(self, value):
 		self.value = value
-	
+
+def populate_include_exclude(args, env):
+	if args.include:
+		env['NIX_PIN_INCLUDE'] = ':'.join(args.include)
+	if args.exclude:
+		env['NIX_PIN_EXCLUDE'] = ':'.join(args.exclude)
+
 def run_action(exe):
 	def run(paths: Paths, args):
 		def realpath_opt(path):
@@ -467,9 +510,7 @@ def run_action(exe):
 		pin_args.extend(['--arg', 'callArgs',
 			args_as_nix(string_values=args.argstr, nix_values=args.arg)])
 
-		here = os.path.dirname(os.path.realpath(__file__))
-		package_root = os.path.dirname(here)
-		run_path = os.path.join(package_root, 'share', 'nix', 'call.nix')
+		run_path = os.path.join(paths.package_root, 'share', 'nix', 'call.nix')
 
 		if exe is None:
 			cmd = args.unknown_args
@@ -479,22 +520,8 @@ def run_action(exe):
 		cmd = cmd + pin_args + [run_path]
 
 		env = {}
-		if args.include:
-			env['NIX_PIN_INCLUDE'] = ':'.join(args.include)
-		if args.exclude:
-			env['NIX_PIN_EXCLUDE'] = ':'.join(args.exclude)
-
-		cmd_prefix = []
-		if env:
-			pairs = list(sorted(env.items()))
-			cmd_prefix = ['env']
-			for k,v in pairs:
-				cmd_prefix.append("%s=%s" % (k,v))
-				# OK to mutate since we've about to execve
-				os.environ[k] = v
-
-		logging.info(' + %s' % (' '.join(cmd_prefix + cmd)))
-		os.execvp(cmd[0], cmd)
+		populate_include_exclude(args, env)
+		run_with_env(env, cmd)
 	run.allow_unknown_args = True
 	return run
 
@@ -520,8 +547,10 @@ def main():
 	p_run_common.add_argument('--no-update', dest='update', action='store_false', help="Don't update pin before building")
 	p_run_common.add_argument('--revision', help="Set revision to update to (for --pin, unless --no-update is given)")
 
-	p_run_common.add_argument('--exclude', action='append', default=[])
-	p_run_common.add_argument('--include', action='append', default=[])
+	def add_include_exclude(dest):
+		dest.add_argument('--exclude', action='append', default=[])
+		dest.add_argument('--include', action='append', default=[])
+
 
 	p_run_common.add_argument('--arg', nargs=2, action='append', default=[])
 	p_run_common.add_argument('--argstr', nargs=2, action='append', default=[])
@@ -542,8 +571,11 @@ def main():
 	p_update.add_argument('-a', '--all', action='store_true')
 	p_update.set_defaults(func=update_action)
 
-	p_create = p_sub.add_parser('list', parents=[p_common])
-	p_create.set_defaults(func=list_action)
+	p_list = p_sub.add_parser('list', parents=[p_common])
+	p_list.set_defaults(func=list_action)
+
+	p_env = p_sub.add_parser('env', parents=[p_common])
+	p_env.set_defaults(func=env_action)
 
 	p_shell = p_sub.add_parser('shell', parents=[p_common, p_run_common])
 	p_shell.set_defaults(func=run_action('nix-shell'))
@@ -551,8 +583,12 @@ def main():
 	p_build = p_sub.add_parser('build', parents=[p_common, p_run_common])
 	p_build.set_defaults(func=run_action('nix-build'))
 
+	# TODO: deprecate
 	p_exec = p_sub.add_parser('exec', parents=[p_common, p_run_common])
 	p_exec.set_defaults(func=run_action(None))
+
+	add_include_exclude(p_run_common)
+	add_include_exclude(p_env)
 
 	p_info = p_sub.add_parser('status', parents=[p_common])
 	p_info.set_defaults(func=info)

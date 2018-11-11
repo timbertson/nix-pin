@@ -29,7 +29,7 @@ let
 				matchesAny = specs: name: lib.any (spec: spec == "*" || name == spec) specs;
 				shouldInclude = (if included == [] then lib.const true else matchesAny included);
 				shouldExclude = matchesAny excluded;
-				allPins = import pinConfig { inherit lib importFromArchive; };
+				allPins = lib.warn "pinConfig: ${pinConfig}" (import pinConfig { inherit lib importFromArchive; });
 				filteredPins = lib.filterAttrs (name: value:
 					if shouldInclude name then (
 						if shouldExclude name then
@@ -108,7 +108,7 @@ let
 				# Note: callPackage is _already_ defined in terms of `self.newScope`, so
 				#       there's no need to override it.
 				# callPackage = fn: args: super.callPackage fn (pins // args); # pins take a backseat to explicit args
-			};
+			} // pins;
 	
 	call = { buildPin, buildPath, callArgs ? {} }:
 		if buildPin != null then (
