@@ -1,3 +1,9 @@
+# Deprecation warning:
+
+`nix-pin` is not under active development. [nix-wrangle](https://github.com/timbertson/nix-wrangle/) is its spiritual successor, with many more features.
+
+----
+
 # nix-pin:
 
 ### Why?
